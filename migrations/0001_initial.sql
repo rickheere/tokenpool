@@ -1,0 +1,11 @@
+CREATE TABLE donors(id TEXT PRIMARY KEY, login TEXT NOT NULL, preferences TEXT NOT NULL DEFAULT '{"repositories":[],"topics":[],"minutes":30,"public":false}', created INTEGER NOT NULL);
+CREATE TABLE credentials(hash TEXT PRIMARY KEY, donor TEXT NOT NULL REFERENCES donors(id), expires INTEGER NOT NULL);
+CREATE TABLE oauth_states(hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+CREATE TABLE projects(repository TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, topics TEXT NOT NULL, commit_sha TEXT NOT NULL, instructions TEXT NOT NULL, instructions_path TEXT NOT NULL, enabled INTEGER NOT NULL, checked INTEGER NOT NULL, error TEXT);
+CREATE TABLE tasks(id TEXT PRIMARY KEY, repository TEXT NOT NULL REFERENCES projects(repository), kind TEXT NOT NULL, title TEXT NOT NULL, source TEXT NOT NULL, scope TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'available', token TEXT, donor TEXT REFERENCES donors(id), expires INTEGER, request_id TEXT, attempts INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
+CREATE UNIQUE INDEX task_scope ON tasks(repository, scope);
+CREATE TABLE reports(id TEXT PRIMARY KEY, task TEXT NOT NULL REFERENCES tasks(id), donor TEXT NOT NULL REFERENCES donors(id), outcome TEXT NOT NULL, report TEXT NOT NULL, result_url TEXT, created INTEGER NOT NULL, claim_hash TEXT NOT NULL);
+CREATE UNIQUE INDEX report_claim ON reports(claim_hash);
+CREATE INDEX tasks_repository ON tasks(repository);
+CREATE INDEX reports_created ON reports(created);
+CREATE INDEX credentials_donor ON credentials(donor);

@@ -1,0 +1,1 @@
+CREATE TABLE request_limits(key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);

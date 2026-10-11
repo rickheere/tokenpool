@@ -1,0 +1,9 @@
+{
+  "name":"tokenpool",
+  "main":"src/worker.ts",
+  "compatibility_date":"2026-10-01",
+  "assets":{"directory":"./web","binding":"ASSETS","run_worker_first":["/v1/*","/auth/*"]},
+  "d1_databases":[{"binding":"DB","database_name":"tokenpool","database_id":"de60f7ea-2e71-424a-b614-6327aa26a3d6","migrations_dir":"migrations"}],
+  "triggers":{"crons":["17 */6 * * *"]},
+  "vars":{"REGISTRY_REPOSITORY":"rickheere/tokenpool","ALLOW_DEMO":"false"}
+}

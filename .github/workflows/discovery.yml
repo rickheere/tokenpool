@@ -1,0 +1,26 @@
+name: Discover participating projects
+on:
+  schedule:
+    - cron: '43 */12 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/discover.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: discovery/participating-projects
+          title: Add discovered participating repositories
+          commit-message: Add discovered GitHub repositories to the project register
+          body: These repositories publish an enabled Tokenpool configuration. Review their upstream instructions before merging. Runtime synchronization independently validates participation.
+          add-paths: registry/*.json

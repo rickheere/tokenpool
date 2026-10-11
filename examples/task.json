@@ -1,0 +1,7 @@
+{
+  "repository":"https://github.com/owner/project",
+  "scope":"issue:42:reproduce",
+  "kind":"reproduce",
+  "title":"Reproduce issue #42",
+  "source":"https://github.com/owner/project/issues/42"
+}

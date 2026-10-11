@@ -1,0 +1,14 @@
+__pycache__/
+*.db
+*.db-*
+*.claim.json
+.env
+node_modules/
+.wrangler/
+.dev.vars
+.preview/
+.DS_Store
+*.credentials.json
+web/README.md
+web/SKILL.md
+web/openapi.json

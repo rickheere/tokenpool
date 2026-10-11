@@ -1,0 +1,19 @@
+{
+  "name": "tokenpool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/sync-assets.mjs && wrangler dev",
+    "deploy": "node scripts/sync-assets.mjs && wrangler deploy",
+    "check": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "db:local": "wrangler d1 migrations apply tokenpool --local",
+    "db:remote": "wrangler d1 migrations apply tokenpool --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "typescript": "^5.9.3",
+    "wrangler": "latest"
+  }
+}
