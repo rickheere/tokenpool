@@ -14,7 +14,7 @@ async function donor(request:Request,env:Env){
  if(!user)throw new APIError(401,'Credential expired or invalid');return user;
 }
 async function credential(env:Env,id:string,days:number){const token=random();await env.DB.prepare('INSERT INTO credentials VALUES(?,?,?)').bind(await hash(token),id,now()+days*86400).run();return token}
-async function saveProject(env:Env,p:Project){await env.DB.prepare(`INSERT INTO projects VALUES(?,?,?,?,?,?,?,?,?,?,NULL) ON CONFLICT(repository) DO UPDATE SET name=excluded.name,description=excluded.description,topics=excluded.topics,commit_sha=excluded.commit_sha,instructions=excluded.instructions,instructions_path=excluded.instructions_path,enabled=1,checked=excluded.checked,error=NULL`).bind(p.repository,p.name,p.description,JSON.stringify(p.topics),p.commit_sha,p.instructions,p.instructions_path,1,now()).run()}
+async function saveProject(env:Env,p:Project){await env.DB.prepare(`INSERT INTO projects VALUES(?,?,?,?,?,?,?,?,?,NULL) ON CONFLICT(repository) DO UPDATE SET name=excluded.name,description=excluded.description,topics=excluded.topics,commit_sha=excluded.commit_sha,instructions=excluded.instructions,instructions_path=excluded.instructions_path,enabled=1,checked=excluded.checked,error=NULL`).bind(p.repository,p.name,p.description,JSON.stringify(p.topics),p.commit_sha,p.instructions,p.instructions_path,1,now()).run()}
 async function sync(env:Env){
  if(!env.REGISTRY_REPOSITORY)throw new APIError(503,'Set REGISTRY_REPOSITORY before syncing');
  const repos=await registryEntries(env.REGISTRY_REPOSITORY,env.GITHUB_TOKEN),result=[];
@@ -26,9 +26,12 @@ async function sync(env:Env){
 async function projectReady(env:Env,repository:string){
  let p=await env.DB.prepare('SELECT * FROM projects WHERE repository=?').bind(repository).first<any>();
  if(!p||!p.enabled)throw new APIError(409,'Project is not enrolled or has paused participation');
- if(p.checked<now()-900 && !(env.ALLOW_DEMO==='true'&&repository.includes('/tokenpool-demo/'))){
-  try{await saveProject(env,await validateProject(repository,env.GITHUB_TOKEN))}catch(e){await env.DB.prepare('UPDATE projects SET enabled=0,error=?,checked=? WHERE repository=?').bind(e instanceof Error?e.message:'Validation failed',now(),repository).run();throw new APIError(409,'Project configuration could not be verified; new work is paused')}
-  p=await env.DB.prepare('SELECT * FROM projects WHERE repository=?').bind(repository).first<any>();
+ if(!(env.ALLOW_DEMO==='true'&&repository.includes('/tokenpool-demo/'))){
+  if(p.checked<now()-3600)throw new APIError(503,'Project snapshot is stale; wait for registry synchronization');
+  const upstream=await fetch(`https://raw.githubusercontent.com/${repositoryName(repository)}/HEAD/.github/tokenpool.json`,{headers:{'User-Agent':'Tokenpool','Cache-Control':'no-cache'}});
+  if(!upstream.ok)throw new APIError(409,'Upstream participation could not be verified');
+  let config:any;try{config=await upstream.json()}catch{throw new APIError(409,'Upstream participation configuration is invalid')}
+  if(config.version!==1||config.enabled!==true||config.instructions!==p.instructions_path)throw new APIError(409,'Project paused or changed its configuration; wait for registry synchronization');
  }return p;
 }
 async function route(request:Request,env:Env):Promise<Response>{
@@ -54,7 +57,7 @@ async function route(request:Request,env:Env):Promise<Response>{
   if(path==='/v1/config')return json({registry:env.REGISTRY_REPOSITORY,login:!!env.GITHUB_CLIENT_ID,demo:env.ALLOW_DEMO==='true'});
   if(path==='/v1/projects'){const rows=await env.DB.prepare('SELECT * FROM projects ORDER BY name').all<any>();return json(rows.results.map(p=>({...p,topics:JSON.parse(p.topics)})))}
   if(path==='/v1/tasks'){
-   const repository=url.searchParams.get('repository'),rows=await env.DB.prepare(`SELECT t.id,t.repository,t.kind,t.title,t.source,t.scope,t.status,t.donor,t.expires,t.attempts,p.commit_sha,p.instructions,p.instructions_path FROM tasks t JOIN projects p ON p.repository=t.repository WHERE p.enabled=1 ${repository?'AND t.repository=?':''} ORDER BY t.attempts,t.created`).bind(...(repository?[repository]:[])).all();return json(rows.results);
+   const repository=url.searchParams.get('repository'),rows=await env.DB.prepare(`SELECT t.id,t.repository,t.kind,t.title,t.source,t.scope,t.status,CASE WHEN json_extract(d.preferences,'$.public')=1 THEN d.login ELSE NULL END AS donor,t.expires,t.attempts,p.commit_sha,p.instructions,p.instructions_path FROM tasks t JOIN projects p ON p.repository=t.repository LEFT JOIN donors d ON d.id=t.donor WHERE p.enabled=1 ${repository?'AND t.repository=?':''} ORDER BY t.attempts,t.created`).bind(...(repository?[repository]:[])).all();return json(rows.results);
   }
   if(path==='/v1/reports'){const rows=await env.DB.prepare(`SELECT r.id,r.task,r.outcome,r.report,r.result_url,r.created,t.repository,CASE WHEN json_extract(d.preferences,'$.public')=1 THEN d.login ELSE 'Anonymous donor' END AS donor FROM reports r JOIN donors d ON d.id=r.donor JOIN tasks t ON t.id=r.task ORDER BY r.created DESC LIMIT 100`).all();return json(rows.results)}
   if(path==='/v1/me'){const user=await donor(request,env);return json({id:user.id,login:user.login,preferences:JSON.parse(user.preferences)})}
@@ -69,8 +72,21 @@ async function route(request:Request,env:Env):Promise<Response>{
  if(Number(request.headers.get('Content-Length')||0)>65536)throw new APIError(413,'Request too large');
  const raw=await request.text();if(raw.length>65536)throw new APIError(413,'Request too large');
  let body:any;try{body=JSON.parse(raw||'{}')}catch{throw new APIError(400,'Expected JSON')};if(!body||typeof body!=='object'||Array.isArray(body))throw new APIError(400,'Expected JSON object');
- if(path==='/v1/admin/sync'){
-  if(!env.ADMIN_TOKEN||request.headers.get('Authorization')!==`Bearer ${env.ADMIN_TOKEN}`)throw new APIError(401,'Admin credential required');return json(await sync(env));
+ if(path==='/v1/admin/sync'||path==='/v1/admin/projects'){
+  if(!env.ADMIN_TOKEN)throw new APIError(503,'Admin credential is not configured');if(request.headers.get('Authorization')!==`Bearer ${env.ADMIN_TOKEN.trim()}`)throw new APIError(401,'Admin credential required');
+  if(path==='/v1/admin/sync')return json(await sync(env));
+  if(!Array.isArray(body.projects)||body.projects.length>100||!Array.isArray(body.repositories)||!Array.isArray(body.failures))throw new APIError(400,'Invalid registry snapshot');
+  const repositories=body.repositories.map((r:string)=>'https://github.com/'+repositoryName(r));
+  const validated:Project[]=[];
+  for(const p of body.projects){
+   const repository='https://github.com/'+repositoryName(p.repository);
+   if(!repositories.includes(repository)||!p.enabled||typeof p.instructions!=='string'||!p.instructions.trim()||p.instructions.length>65536||typeof p.commit_sha!=='string'||!/^[a-f0-9]{40}$/.test(p.commit_sha)||typeof p.instructions_path!=='string'||typeof p.name!=='string'||typeof p.description!=='string'||!Array.isArray(p.topics)||!p.topics.every((t:any)=>typeof t==='string'))throw new APIError(400,'Invalid project snapshot');
+   validated.push({...p,repository});
+  }
+  for(const p of validated)await saveProject(env,p);
+  const known=await env.DB.prepare('SELECT repository FROM projects').all<{repository:string}>();
+  for(const p of known.results){const failure=body.failures.find((f:any)=>f.repository===p.repository);if(!repositories.includes(p.repository)||failure)await env.DB.prepare('UPDATE projects SET enabled=0,error=?,checked=? WHERE repository=?').bind(failure?.error||'Removed from registry',now(),p.repository).run()}
+  return json({updated:validated.length,disabled:body.failures.length});
  }
  if(path==='/v1/demo/login'){
   if(env.ALLOW_DEMO!=='true')throw new APIError(404,'Not found');
@@ -88,7 +104,7 @@ async function route(request:Request,env:Env):Promise<Response>{
  if(path==='/v1/session'){
   const token=request.headers.get('Authorization')?.replace(/^Bearer /,'');
   if(!token)throw new APIError(401,'Supply a platform credential');
-  return new Response('{}',{headers:{'Content-Type':'application/json','Cache-Control':'no-store','Set-Cookie':`tp_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${url.protocol==='https:'?'; Secure':''}`}});
+  const session=await credential(env,user.id,7);return new Response('{}',{headers:{'Content-Type':'application/json','Cache-Control':'no-store','Set-Cookie':`tp_session=${session}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${url.protocol==='https:'?'; Secure':''}`}});
  }
  if(path==='/v1/logout'){
   const token=cookie(request,'tp_session');if(token)await env.DB.prepare('DELETE FROM credentials WHERE hash=?').bind(await hash(token)).run();return new Response('{}',{headers:{'Content-Type':'application/json','Set-Cookie':'tp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'}});
@@ -139,5 +155,5 @@ async function route(request:Request,env:Env):Promise<Response>{
 }
 export default {
  async fetch(request:Request,env:Env){try{return await route(request,env)}catch(e){if(e instanceof APIError)return json({error:e.message},e.status);if(e instanceof GitHubError)return json({error:e.message},502);console.error(e instanceof Error?e.message:'Request failed');return json({error:'Request failed; retry or contact the operator'},500)}},
- async scheduled(_event:ScheduledEvent,env:Env,ctx:ExecutionContext){ctx.waitUntil(sync(env).then(async()=>{await env.DB.batch([env.DB.prepare('DELETE FROM credentials WHERE expires<?').bind(now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires<?').bind(now()),env.DB.prepare('DELETE FROM request_limits WHERE expires<?').bind(now())])}))}
+ async scheduled(_event:ScheduledEvent,env:Env,ctx:ExecutionContext){ctx.waitUntil((async()=>{if(env.GITHUB_TOKEN)await sync(env);await env.DB.batch([env.DB.prepare('DELETE FROM credentials WHERE expires<?').bind(now()),env.DB.prepare('DELETE FROM oauth_states WHERE expires<?').bind(now()),env.DB.prepare('DELETE FROM request_limits WHERE expires<?').bind(now())])})())}
 };

@@ -20,6 +20,6 @@ The machine-readable HTTP contract is `openapi.json`. JSON requests, JSON respon
 
 `complete` records a finished session, not maintainer acceptance. Tasks remain available for subsequent work until clients determine from the project that work is no longer needed; use pause when repeated work would be inappropriate. No automatic GitHub issue closing or merging.
 
-400 malformed request; 401 missing/invalid identity; 403 cross-origin mutation; 404 unknown resource; 409 unavailable project/task or stale proof; 429 rate limit; 503 missing service configuration. Project validation failures pause new claims. The public endpoint is limited to 240 mutations per IP per minute.
+400 malformed request; 401 missing/invalid identity; 403 cross-origin mutation; 404 unknown resource; 409 unavailable project/task or stale proof; 429 rate limit; 503 missing service configuration. Project validation failures pause new claims. Admin-only `/v1/admin/projects` accepts snapshots validated by the trusted register workflow. No donor can enroll a repository. The public endpoint is limited to 240 mutations per IP per minute.
 
 Reservations only coordinate exact scopes. Broad overlapping work requires a shared decomposition. External GitHub actions cannot be atomic with this coordinator; clients must use stable result references and check ownership immediately before publishing. Claim expiry cannot cancel an external process that ignores the protocol.

@@ -20,7 +20,17 @@
         "summary": "Read projects",
         "responses": {
           "200": {
-            "description": "JSON result"
+            "description": "JSON result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Project"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -30,7 +40,17 @@
         "summary": "Read tasks",
         "responses": {
           "200": {
-            "description": "JSON result"
+            "description": "JSON result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Task"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -109,7 +129,17 @@
         "summary": "Read reports",
         "responses": {
           "200": {
-            "description": "JSON result"
+            "description": "JSON result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Report"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -167,7 +197,14 @@
         },
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Claim"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request"
@@ -705,6 +742,85 @@
         }
       }
     },
+    "/v1/admin/projects": {
+      "post": {
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "projects",
+                  "repositories",
+                  "failures"
+                ],
+                "properties": {
+                  "projects": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Project"
+                    }
+                  },
+                  "repositories": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "failures": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "repository",
+                        "error"
+                      ],
+                      "properties": {
+                        "repository": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "403": {
+            "description": "Cross-origin request"
+          },
+          "404": {
+            "description": "Unknown resource"
+          },
+          "409": {
+            "description": "Conflict or stale proof"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        }
+      }
+    },
     "/v1/preferences": {
       "post": {
         "security": [
@@ -767,6 +883,171 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Platform credential; auth/github-token instead takes a GitHub identity token"
+      }
+    },
+    "schemas": {
+      "Project": {
+        "type": "object",
+        "required": [
+          "repository",
+          "name",
+          "description",
+          "topics",
+          "commit_sha",
+          "instructions",
+          "instructions_path",
+          "enabled"
+        ],
+        "properties": {
+          "repository": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "commit_sha": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "instructions_path": {
+            "type": "string"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": [
+              "integer",
+              "boolean"
+            ]
+          },
+          "checked": {
+            "type": "integer"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Claim": {
+        "type": "object",
+        "required": [
+          "task",
+          "token",
+          "expires",
+          "instructions",
+          "commit_sha"
+        ],
+        "properties": {
+          "task": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "commit_sha": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "integer"
+          }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "instructions_path": {
+            "type": "string"
+          },
+          "commit_sha": {
+            "type": "string"
+          },
+          "donor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          }
+        }
+      },
+      "Report": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "report": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "donor": {
+            "type": "string"
+          },
+          "result_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created": {
+            "type": "integer"
+          }
+        }
       }
     }
   }

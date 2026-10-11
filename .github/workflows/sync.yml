@@ -1,0 +1,28 @@
+name: Sync project register
+on:
+  schedule:
+    - cron: '7,17,27,37,47,57 * * * *'
+  push:
+    branches: [main]
+    paths: ['registry/**', '.github/workflows/sync.yml', 'scripts/sync-registry.mjs', 'src/github.ts']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: registry-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/sync-registry.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TOKENPOOL_ADMIN_TOKEN: ${{ secrets.TOKENPOOL_ADMIN_TOKEN }}
+          TOKENPOOL_URL: https://tokenpool.rickheere.workers.dev

@@ -5,7 +5,7 @@ def main():
     p.add_argument('--url',default=os.environ.get('TOKENPOOL_URL','http://127.0.0.1:8787'))
     p.add_argument('command',choices=['login','tasks','projects','reports','me','register','claim','heartbeat','release','complete','pause','keepalive'])
     p.add_argument('--credential-file'); p.add_argument('--use-gh',action='store_true')
-    p.add_argument('--minutes',type=int,default=30); p.add_argument('--watch-pid',type=int); p.add_argument('--result-url'); p.add_argument('--task'); p.add_argument('--claim-file'); p.add_argument('--file'); p.add_argument('--report')
+    p.add_argument('--minutes',type=int,default=30); p.add_argument('--watch-pid',type=int); p.add_argument('--result-url'); p.add_argument('--task'); p.add_argument('--request-id'); p.add_argument('--claim-file'); p.add_argument('--file'); p.add_argument('--report')
     a=p.parse_args(); data={}
     if a.command=='login':
         if not a.credential_file: p.error('login requires --credential-file')
@@ -13,7 +13,7 @@ def main():
         if not a.url.startswith('https://') and not a.url.startswith('http://127.0.0.1:'): p.error('Login requires HTTPS')
         github_token=subprocess.check_output(['gh','auth','token'],text=True).strip() if a.use_gh else os.environ.get('GITHUB_TOKEN')
         if not github_token: p.error('Set GITHUB_TOKEN or explicitly use --use-gh; identity token is sent to this coordinator once')
-        req=urllib.request.Request(a.url+'/v1/auth/github-token',data=b'{}',headers={'Authorization':'Bearer '+github_token,'Content-Type':'application/json'})
+        req=urllib.request.Request(a.url+'/v1/auth/github-token',data=b'{}',headers={'User-Agent':'Tokenpool/1.0','Authorization':'Bearer '+github_token,'Content-Type':'application/json'})
         try:
             with urllib.request.urlopen(req,timeout=15) as response: result=json.load(response)
         except urllib.error.HTTPError as e:
@@ -36,7 +36,9 @@ def main():
     if a.command=='register':
         with open(a.file) as f: data=json.load(f)
     elif a.command not in ('tasks','projects','reports','me'):
-        if a.command=='claim': data={'task':a.task,'request_id':str(uuid.uuid4())}
+        if a.command=='claim':
+            data={'task':a.task,'request_id':a.request_id or str(uuid.uuid4())}
+            print('Claim request ID: '+data['request_id'],file=sys.stderr)
         else:
             with open(a.claim_file) as f: data=json.load(f)
             if a.result_url: data['result_url']=a.result_url
@@ -44,7 +46,7 @@ def main():
                 with open(a.report) as f: data['report']=f.read()
     def request(command):
         read=command in ('tasks','projects','reports','me')
-        req=urllib.request.Request(a.url+'/v1/'+('tasks' if command=='register' else command),data=None if read else json.dumps(data).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+saved.get('token',os.environ.get('TOKENPOOL_TOKEN',''))})
+        req=urllib.request.Request(a.url+'/v1/'+('tasks' if command=='register' else command),data=None if read else json.dumps(data).encode(),headers={'User-Agent':'Tokenpool/1.0','Content-Type':'application/json','Authorization':'Bearer '+saved.get('token',os.environ.get('TOKENPOOL_TOKEN',''))})
         with urllib.request.urlopen(req,timeout=15) as response: return json.load(response)
     try:
         if a.command=='keepalive':
@@ -61,6 +63,7 @@ def main():
         if a.command=='claim' and a.claim_file:
             fd=os.open(a.claim_file,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
             with os.fdopen(fd,'w') as f: json.dump(result,f)
+            result={k:v for k,v in result.items() if k!='token'}
         print(json.dumps(result,indent=2))
     except urllib.error.HTTPError as e:
         print(e.read().decode(),file=sys.stderr); sys.exit(1)

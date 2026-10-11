@@ -9,11 +9,11 @@ for(let page=1;page<=10;page++){
  if(result.items.length<100)break;
 }
 // Code search is an additional discovery route and requires authentication.
-if(token){for(let page=1;page<=10;page++){
+if(token){try{for(let page=1;page<=10;page++){
  const result=await api(`/search/code?q=filename:tokenpool.json+path:.github&per_page=100&page=${page}`);
  for(const item of result.items)if(item.path==='.github/tokenpool.json')candidates.set(item.repository.full_name,item.repository);
  if(result.items.length<100)break;
-}}
+}}catch(e){console.warn(`Code search unavailable; topic discovery continues: ${e.message}`)}}
 await mkdir('registry',{recursive:true});let added=0;
 for(const [name] of candidates){
  try{
