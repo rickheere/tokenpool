@@ -1,4 +1,4 @@
-import argparse, json, os, sys, time, uuid, subprocess, urllib.request, urllib.error
+import argparse, json, os, sys, time, uuid, subprocess, urllib.request, urllib.error, urllib.parse
 
 def main():
     p=argparse.ArgumentParser(description='Thin Tokenpool protocol client')
@@ -10,7 +10,8 @@ def main():
     if a.command=='login':
         if not a.credential_file: p.error('login requires --credential-file')
         if os.path.exists(a.credential_file): p.error('Credential file already exists')
-        if not a.url.startswith('https://') and not a.url.startswith('http://127.0.0.1:'): p.error('Login requires HTTPS')
+        endpoint=urllib.parse.urlparse(a.url)
+        if endpoint.username or endpoint.password or not (endpoint.scheme=='https' or (endpoint.scheme=='http' and endpoint.hostname=='127.0.0.1')): p.error('Login requires HTTPS or loopback HTTP')
         github_token=subprocess.check_output(['gh','auth','token'],text=True).strip() if a.use_gh else os.environ.get('GITHUB_TOKEN')
         if not github_token: p.error('Set GITHUB_TOKEN or explicitly use --use-gh; identity token is sent to this coordinator once')
         req=urllib.request.Request(a.url+'/v1/auth/github-token',data=b'{}',headers={'User-Agent':'Tokenpool/1.0','Authorization':'Bearer '+github_token,'Content-Type':'application/json'})
