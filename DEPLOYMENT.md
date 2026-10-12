@@ -23,3 +23,7 @@ Cloudflare Workers/D1 plan limits apply. Monitor usage and choose paid limits ex
 ## GitHub automation
 
 CI checks the register structure without external network or credentials on fork PRs. Runtime sync verifies real upstream configuration and license. Discovery runs on the trusted default branch and opens a single rolling PR; it never merges it. GitHub Actions repository settings must permit workflows to create pull requests.
+
+## Prepared-queue migration
+
+Migration 0004 moves existing tasks to preparation and invalidates old leases. A database trigger rejects clients that attempt to create a claim without the current phase. Deploy the new Worker immediately after the migration; old clients must use an explicit preparation claim and submit a structured proposal before execution. Historical reports remain available.

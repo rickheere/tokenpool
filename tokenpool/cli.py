@@ -3,9 +3,9 @@ import argparse, json, os, sys, time, uuid, subprocess, urllib.request, urllib.e
 def main():
     p=argparse.ArgumentParser(description='Thin Tokenpool protocol client')
     p.add_argument('--url',default=os.environ.get('TOKENPOOL_URL','http://127.0.0.1:8787'))
-    p.add_argument('command',choices=['login','tasks','projects','reports','me','register','claim','heartbeat','release','complete','pause','keepalive'])
+    p.add_argument('command',choices=['login','tasks','projects','reports','me','register','claim','heartbeat','release','complete','pause','prepare','keepalive'])
     p.add_argument('--credential-file'); p.add_argument('--use-gh',action='store_true')
-    p.add_argument('--minutes',type=int,default=30); p.add_argument('--watch-pid',type=int); p.add_argument('--result-url'); p.add_argument('--task'); p.add_argument('--request-id'); p.add_argument('--claim-file'); p.add_argument('--file'); p.add_argument('--report')
+    p.add_argument('--minutes',type=int,default=30); p.add_argument('--watch-pid',type=int); p.add_argument('--result-url'); p.add_argument('--task'); p.add_argument('--request-id'); p.add_argument('--phase',choices=['preparation','execution'],default='execution'); p.add_argument('--proposal-file'); p.add_argument('--claim-file'); p.add_argument('--file'); p.add_argument('--report')
     a=p.parse_args(); data={}
     if a.command=='login':
         if not a.credential_file: p.error('login requires --credential-file')
@@ -34,20 +34,23 @@ def main():
     if a.command=='claim' and not a.task: p.error("claim requires --task")
     if a.command not in ('tasks','projects','reports','me','register','claim') and not a.claim_file: p.error("This command requires --claim-file")
     if a.command in ('release','complete','pause') and not a.report: p.error("This command requires --report")
+    if a.command=='prepare' and not a.proposal_file: p.error('prepare requires --proposal-file')
     if a.command=='register':
         with open(a.file) as f: data=json.load(f)
     elif a.command not in ('tasks','projects','reports','me'):
         if a.command=='claim':
-            data={'task':a.task,'request_id':a.request_id or str(uuid.uuid4())}
+            data={'task':a.task,'request_id':a.request_id or str(uuid.uuid4()),'phase':a.phase}
             print('Claim request ID: '+data['request_id'],file=sys.stderr)
         else:
             with open(a.claim_file) as f: data=json.load(f)
+            if a.command=='prepare':
+                with open(a.proposal_file) as f: data['proposal']=json.load(f)
             if a.result_url: data['result_url']=a.result_url
             if a.report:
                 with open(a.report) as f: data['report']=f.read()
     def request(command):
         read=command in ('tasks','projects','reports','me')
-        req=urllib.request.Request(a.url+'/v1/'+('tasks' if command=='register' else command),data=None if read else json.dumps(data).encode(),headers={'User-Agent':'Tokenpool/1.0','Content-Type':'application/json','Authorization':'Bearer '+saved.get('token',os.environ.get('TOKENPOOL_TOKEN',''))})
+        req=urllib.request.Request(a.url+'/v1/'+('tasks' if command=='register' else 'projects?metadata=true' if command=='projects' else command),data=None if read else json.dumps(data).encode(),headers={'User-Agent':'Tokenpool/1.0','Content-Type':'application/json','Authorization':'Bearer '+saved.get('token',os.environ.get('TOKENPOOL_TOKEN',''))})
         with urllib.request.urlopen(req,timeout=15) as response: return json.load(response)
     try:
         if a.command=='keepalive':

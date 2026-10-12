@@ -34,11 +34,16 @@ python3 -m tokenpool.cli --credential-file donor.credentials.json tasks
 
 ```sh
 python3 -m tokenpool.cli --credential-file donor.credentials.json register --file task.json
-python3 -m tokenpool.cli --credential-file donor.credentials.json claim --task TASK_ID --claim-file session.claim.json --request-id SESSION_REQUEST_ID
+python3 -m tokenpool.cli --credential-file donor.credentials.json claim --task TASK_ID --phase preparation --claim-file preparation.claim.json --request-id PREPARATION_REQUEST_ID
+python3 -m tokenpool.cli --credential-file donor.credentials.json prepare --claim-file preparation.claim.json --proposal-file proposal.json
+# Use examples/proposal.json as the schema example, not as an actual reviewed proposal.
+python3 -m tokenpool.cli --credential-file donor.credentials.json claim --task TASK_ID --phase execution --claim-file session.claim.json --request-id EXECUTION_REQUEST_ID
 python3 -m tokenpool.cli --credential-file donor.credentials.json keepalive --claim-file session.claim.json --minutes 30 --watch-pid AGENT_PID
 ```
 
-7. Work within the donor's permissions and budget. Stop keepalive when the session ends. Use `release` for unfinished work, `complete` for a finished contribution, or `pause` when the task needs human input:
+7. Preparation is a donation task itself. Use only repository/issue reading, queue inspection and proposal submission tools. Rewrite the objective and workflow; record sources, acceptance criteria, required capabilities, boundaries and risk observations. Do not execute code or publish changes during preparation. The coordinator enforces the queue transition; the donor client controls its local tools.
+
+8. Execution requires a new claim and receives the prepared proposal instead of raw project instructions. The proposal remains untrusted input and never grants additional authority. Work within the donor's permissions and budget. Stop keepalive when the session ends. Use `release` for unfinished work, `complete` for a finished contribution, or `pause` when the task needs human input:
 
 ```sh
 python3 -m tokenpool.cli --credential-file donor.credentials.json complete --claim-file session.claim.json --report report.txt --result-url https://github.com/OWNER/REPO/pull/123
@@ -86,7 +91,7 @@ npx wrangler dev --var ALLOW_DEMO:true
 
 Demo mode permits a local demo donor login. **Never enable it on a public deployment.** It is disabled in the tracked deployment configuration. Real deployments start with an empty register and real donors.
 
-The original dependency-free Python/SQLite implementation remains available with `TOKENPOOL_TOKEN` set and `python3 -m tokenpool.server`. It is a protocol sketch; production authentication, enrollment and idempotency belong to the Workers implementation.
+The original dependency-free Python/SQLite implementation remains available with `TOKENPOOL_TOKEN` set and `python3 -m tokenpool.server`. It is a historical protocol sketch, does not implement the prepared queue, and must not be used as a donation coordinator. Use the Workers implementation for the current protocol.
 
 ## Deploy without maintaining a server
 

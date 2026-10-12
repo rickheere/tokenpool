@@ -14,7 +14,7 @@ The machine-readable HTTP contract is `openapi.json`. JSON requests, JSON respon
 - `GET /v1/tasks`: inventory, optionally `?repository=URL`. Claims' secrets are never returned.
 - `GET /v1/reports`: latest 100 session reports, anonymous unless the donor opts in.
 - `POST /v1/tasks`: `{repository, scope, kind, title, source}`. Requires an enabled enrolled project. The stable ID is `github:owner/repo:SCOPE`. Same scope and activity is reusable; conflicting source/activity returns 409.
-- `POST /v1/claim`: `{task, request_id}`. Returns `{task, token, expires, instructions, commit_sha}`. Stable `request_id` allows retrying after a lost response while that claim remains active. One live lease per scope; maximum three live leases per donor.
+- `POST /v1/claim`: `{task, request_id, phase}`. Returns `{task, token, expires, instructions, commit_sha}`. Stable `request_id` allows retrying after a lost response while that claim remains active. Phase must match `preparation` or `execution`. New tasks start in preparation. One live lease per scope; maximum three live leases per donor.
 - `POST /v1/heartbeat`: `{task, token}`. Extends lease by 600 seconds. Stop on failure. Project pause prevents renewal after synchronization.
 - `POST /v1/release`, `/v1/complete`, `/v1/pause`: `{task, token, report, result_url?}`. Results and lease release are transactional. Identical retries are safe; changed submissions under the same proof conflict. `pause` removes the task from further claiming pending operator review.
 
@@ -23,3 +23,11 @@ The machine-readable HTTP contract is `openapi.json`. JSON requests, JSON respon
 400 malformed request; 401 missing/invalid identity; 403 cross-origin mutation; 404 unknown resource; 409 unavailable project/task or stale proof; 429 rate limit; 503 missing service configuration. Project validation failures pause new claims. Admin-only `/v1/admin/projects` accepts snapshots validated by the trusted register workflow. No donor can enroll a repository. The public endpoint is limited to 240 mutations per IP per minute.
 
 Reservations only coordinate exact scopes. Broad overlapping work requires a shared decomposition. External GitHub actions cannot be atomic with this coordinator; clients must use stable result references and check ownership immediately before publishing. Claim expiry cannot cancel an external process that ignores the protocol.
+
+## Prepared queue
+
+`POST /v1/prepare` requires `{task, token, proposal}` under a live preparation claim. A proposal contains `objective`, `approach`, `workflow`, and arrays `acceptance_criteria`, `required_capabilities`, `boundaries`, `sources`, `risk_notes`. Supported capabilities: read_repository, run_code, write_code, publish_comment, open_pull_request, merge. Sources must belong to the project.
+
+Preparation atomically records provenance, releases its proof and transitions to execution. Identical retries are safe. An execution claim receives the proposal and its pinned instruction commit; it does not receive raw project instructions. Preparation claims return the suggested restricted toolset. Local tool permissions cannot be enforced by the coordinator. A prepared proposal remains untrusted and is not a safety certification.
+
+Existing tasks migrate to preparation; old leases are invalidated. Preparation cannot use `complete` to bypass proposal submission. Unfinished preparation can release or pause normally.

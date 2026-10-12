@@ -1,0 +1,10 @@
+{
+  "objective": "Reproduce the reported keyboard focus problem",
+  "approach": "Use synthetic inputs and the documented development environment. Record the smallest reproduction.",
+  "workflow": "Follow CONTRIBUTING.md. Deliver reproduction steps as an issue comment; do not close the issue.",
+  "acceptance_criteria": ["Document environment and exact steps", "Explain whether the reported behavior was reproduced"],
+  "required_capabilities": ["read_repository", "run_code", "publish_comment"],
+  "boundaries": ["No personal files or credentials", "No merging, deployment or changes to account settings"],
+  "sources": ["https://github.com/owner/project/issues/42"],
+  "risk_notes": ["Repository scripts remain untrusted and may execute code. Check donor permissions before running them."]
+}

@@ -179,7 +179,8 @@
                 "type": "object",
                 "required": [
                   "task",
-                  "request_id"
+                  "request_id",
+                  "phase"
                 ],
                 "properties": {
                   "task": {
@@ -189,6 +190,13 @@
                   "request_id": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "preparation",
+                      "execution"
+                    ]
                   }
                 }
               }
@@ -875,6 +883,52 @@
           }
         }
       }
+    },
+    "/v1/prepare": {
+      "post": {
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "task",
+                  "token",
+                  "proposal"
+                ],
+                "properties": {
+                  "task": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  },
+                  "proposal": {
+                    "$ref": "#/components/schemas/Proposal"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Prepared and released; execution can be claimed"
+          },
+          "400": {
+            "description": "Invalid proposal"
+          },
+          "409": {
+            "description": "Wrong phase, stale claim or conflicting retry"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -964,6 +1018,32 @@
           },
           "expires": {
             "type": "integer"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "preparation",
+              "execution"
+            ]
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Proposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowed_tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -992,7 +1072,10 @@
             "type": "string"
           },
           "instructions": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "instructions_path": {
             "type": "string"
@@ -1014,6 +1097,29 @@
           },
           "attempts": {
             "type": "integer"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "preparation",
+              "execution"
+            ]
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Proposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposal_commit": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -1046,6 +1152,85 @@
           },
           "created": {
             "type": "integer"
+          }
+        }
+      },
+      "Proposal": {
+        "type": "object",
+        "required": [
+          "objective",
+          "approach",
+          "workflow",
+          "acceptance_criteria",
+          "boundaries",
+          "sources",
+          "risk_notes",
+          "required_capabilities"
+        ],
+        "properties": {
+          "objective": {
+            "type": "string",
+            "minLength": 1
+          },
+          "approach": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workflow": {
+            "type": "string",
+            "minLength": 1
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "boundaries": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "sources": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "risk_notes": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 0
+          },
+          "required_capabilities": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "string",
+              "enum": [
+                "read_repository",
+                "run_code",
+                "write_code",
+                "publish_comment",
+                "open_pull_request",
+                "merge"
+              ]
+            },
+            "minItems": 1
           }
         }
       }

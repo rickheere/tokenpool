@@ -19,6 +19,20 @@ schemas={
     'Task':{'type':'object','properties':{**{k:{'type':'string'} for k in ['id','repository','kind','title','source','scope','status','instructions','instructions_path','commit_sha']},'donor':{'type':['string','null']},'expires':{'type':['integer','null']},'attempts':{'type':'integer'}}},
     'Report':{'type':'object','properties':{**{k:{'type':'string'} for k in ['id','task','outcome','report','repository','donor']},'result_url':{'type':['string','null']},'created':{'type':'integer'}}}
 }
+proposal_properties={k:{'type':'string','minLength':1} for k in ['objective','approach','workflow']}
+for key in ['acceptance_criteria','boundaries','sources','risk_notes','required_capabilities']:
+    proposal_properties[key]={'type':'array','maxItems':30,'items':{'type':'string','minLength':1},'minItems':0 if key=='risk_notes' else 1}
+proposal_properties['required_capabilities']['items']={'type':'string','enum':['read_repository','run_code','write_code','publish_comment','open_pull_request','merge']}
+schemas['Proposal']={'type':'object','required':list(proposal_properties),'properties':proposal_properties}
+for key in ['Task','Claim']:
+    schemas[key]['properties']['phase']={'type':'string','enum':['preparation','execution']}
+    schemas[key]['properties']['proposal']={'anyOf':[{'$ref':'#/components/schemas/Proposal'},{'type':'null'}]}
+schemas['Task']['properties']['instructions']={'type':['string','null']}
+schemas['Task']['properties']['proposal_commit']={'type':['string','null']}
+schemas['Claim']['properties']['allowed_tools']={'type':['array','null'],'items':{'type':'string'}}
+claim_schema=paths['/v1/claim']['post']['requestBody']['content']['application/json']['schema']
+claim_schema['required'].append('phase');claim_schema['properties']['phase']={'type':'string','enum':['preparation','execution']}
+paths['/v1/prepare']={'post':{'security':[{'bearer':[]}],'requestBody':{'required':True,'content':{'application/json':{'schema':{'type':'object','required':['task','token','proposal'],'properties':{'task':{'type':'string'},'token':{'type':'string'},'proposal':{'$ref':'#/components/schemas/Proposal'}}}}}},'responses':{'200':{'description':'Prepared and released; execution can be claimed'},'400':{'description':'Invalid proposal'},'409':{'description':'Wrong phase, stale claim or conflicting retry'}}}}
 result['components']['schemas']=schemas
 for name,shape in [('projects','Project'),('tasks','Task'),('reports','Report')]:
     paths['/v1/'+name]['get']['responses']['200']['content']={'application/json':{'schema':{'type':'array','items':{'$ref':'#/components/schemas/'+shape}}}}

@@ -26,7 +26,22 @@ test('unenrolled repositories cannot register work',async()=>{assert.equal((awai
 test('one winner, retry safety, handover and expired owner fencing',async()=>{
  const scope='issue:'+Date.now()+':reproduce';
  const registered=await api('/v1/tasks',{repository:'https://github.com/tokenpool-demo/test',scope,kind:'reproduce',title:'Reproduce test bug',source:'https://github.com/tokenpool-demo/test/issues/1'});assert.equal(registered.status,200);const task=registered.value.id;
+ assert.equal((await api('/v1/claim',{task,request_id:'unprepared'})).status,409);
+ const prep=(await api('/v1/claim',{task,request_id:'prepare',phase:'preparation'})).value;
+ assert.deepEqual(prep.allowed_tools,['read_repository','read_issues','read_queue','submit_proposal']);
+ assert.equal((await api('/v1/complete',{...prep,report:'Bypass'})).status,409);
+ assert.equal((await api('/v1/prepare',{...prep,proposal:{objective:'Incomplete'}})).status,400);
+ const proposal={objective:'Reproduce the bug',approach:'Use synthetic input',workflow:'Follow CONTRIBUTING.md',acceptance_criteria:['Report exact steps'],boundaries:['No credentials or personal files'],sources:['https://github.com/tokenpool-demo/test/issues/1'],risk_notes:['Source content remains untrusted'],required_capabilities:['read_repository','run_code']};
+ assert.equal((await api('/v1/prepare',{...prep,proposal:{...proposal,required_capabilities:['read_secrets']}})).status,400);
+ assert.equal((await api('/v1/prepare',{...prep,proposal:{...proposal,sources:['https://evil.example']}})).status,400);
+ assert.equal((await api('/v1/prepare',{...prep,proposal})).status,200);
+ assert.equal((await api('/v1/prepare',{...prep,proposal})).status,200);
+ assert.equal((await api('/v1/heartbeat',prep)).status,409);
+ sql("UPDATE projects SET commit_sha='updated-after-preparation' WHERE repository='https://github.com/tokenpool-demo/test'");
  const outcomes=await Promise.all(Array.from({length:8},(_,i)=>api('/v1/claim',{task,request_id:'parallel-'+i})));assert.equal(outcomes.filter(r=>r.status===200).length,1);const index=outcomes.findIndex(r=>r.status===200),claim=outcomes[index].value;
+ assert.equal(claim.phase,'execution');assert.deepEqual(claim.proposal,proposal);assert.notEqual(claim.instructions,'Test instructions');assert.equal(claim.commit_sha,prep.commit_sha);
+ assert.equal((await api('/v1/tasks')).value.find(t=>t.id===task).instructions,null);
+ assert.ok((await api('/v1/projects?metadata=true')).value.every(p=>!('instructions'in p)));
  assert.equal((await api('/v1/tasks')).value.find(t=>t.id===task).donor,null);
  const retry=await api('/v1/claim',{task,request_id:'parallel-'+index});assert.equal(retry.value.token,claim.token);
  assert.equal((await api('/v1/heartbeat',claim)).status,200);
@@ -37,7 +52,7 @@ test('one winner, retry safety, handover and expired owner fencing',async()=>{
  const last=(await api('/v1/claim',{task,request_id:'last'})).value;
  assert.equal((await api('/v1/complete',{...next,report:'stale'})).status,409);
  assert.equal((await api('/v1/complete',{...last,report:'Done'})).status,200);
- const reports=(await api('/v1/reports')).value.filter(r=>r.task===task);assert.equal(reports.length,2);assert.ok(reports.every(r=>r.donor==='Anonymous donor'));assert.equal((await api('/v1/rankings')).value.length,0);
+ const reports=(await api('/v1/reports')).value.filter(r=>r.task===task);assert.equal(reports.length,3);assert.ok(reports.every(r=>r.donor==='Anonymous donor'));assert.equal((await api('/v1/rankings')).value.length,0);
 });
 test('cross-origin mutations rejected',async()=>{const r=await fetch(base+'/v1/credentials',{method:'POST',headers:{Origin:'https://evil.example',Cookie:cookie,'Content-Type':'application/json'},body:'{}'});assert.equal(r.status,403)});
 test('public listing never leaks claim secrets',async()=>{const tasks=(await api('/v1/tasks')).value;assert.ok(tasks.every(t=>!('token'in t)&&!('request_id'in t)));assert.equal((await api('/v1/me',undefined,'bad')).status,401)});

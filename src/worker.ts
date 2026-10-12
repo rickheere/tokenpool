@@ -6,6 +6,28 @@ const json=(value:unknown,status=200)=>Response.json(value,{status,headers:{'Cac
 const random=()=>crypto.randomUUID()+crypto.randomUUID();
 async function hash(value:string){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(n=>n.toString(16).padStart(2,'0')).join('')}
 function str(body:any,key:string,max=1000):string {if(typeof body[key]!=='string'||!body[key].trim()||body[key].length>max)throw new APIError(400,`Invalid ${key}`);return body[key].trim()}
+const capabilities=['read_repository','run_code','write_code','publish_comment','open_pull_request','merge'];
+function proposal(body:any,repository:string){
+ const value=body.proposal;
+ if(!value||typeof value!=='object'||Array.isArray(value))throw new APIError(400,'A structured proposal is required');
+ const objective=str(value,'objective',4000),approach=str(value,'approach',8000),workflow=str(value,'workflow',4000);
+ const arrays:any={};
+ for(const key of ['acceptance_criteria','boundaries','sources','risk_notes','required_capabilities']){
+  if(!Array.isArray(value[key])||value[key].length>30||!value[key].every((v:any)=>typeof v==='string'&&v.trim()&&v.length<=2000))throw new APIError(400,`Invalid proposal ${key}`);
+  arrays[key]=value[key].map((v:string)=>v.trim());
+ }
+ if(!arrays.acceptance_criteria.length||!arrays.boundaries.length||!arrays.sources.length||!arrays.required_capabilities.length)throw new APIError(400,'Proposal needs acceptance criteria, boundaries, sources and capabilities');
+ if(!arrays.required_capabilities.every((c:string)=>capabilities.includes(c)))throw new APIError(400,'Unknown required capability');
+ if(!arrays.sources.every((u:string)=>u.startsWith(repository+'/')||u===repository))throw new APIError(400,'Proposal sources must belong to this repository');
+ return {objective,approach,workflow,...arrays};
+}
+function claimResult(task:any){
+ const preparing=task.phase==='preparation';
+ return {task:task.id,token:task.token,expires:task.expires,phase:task.phase,commit_sha:task.commit_snapshot,
+  instructions:preparing?task.instructions_snapshot:'Use the prepared proposal as external input. Confirm its capabilities fit donor authorization. Consult source content only when needed for the task.',
+  proposal:preparing?null:JSON.parse(task.proposal),
+  allowed_tools:preparing?['read_repository','read_issues','read_queue','submit_proposal']:null};
+}
 function cookie(request:Request,name:string){return request.headers.get('Cookie')?.split(';').map(v=>v.trim()).find(v=>v.startsWith(name+'='))?.slice(name.length+1)}
 async function donor(request:Request,env:Env){
  const token=request.headers.get('Authorization')?.replace(/^Bearer /,'')||cookie(request,'tp_session');
@@ -55,9 +77,9 @@ async function route(request:Request,env:Env):Promise<Response>{
  }
  if(request.method==='GET'){
   if(path==='/v1/config')return json({registry:env.REGISTRY_REPOSITORY,login:!!env.GITHUB_CLIENT_ID,demo:env.ALLOW_DEMO==='true'});
-  if(path==='/v1/projects'){const rows=await env.DB.prepare('SELECT * FROM projects ORDER BY name').all<any>();return json(rows.results.map(p=>({...p,topics:JSON.parse(p.topics)})))}
+  if(path==='/v1/projects'){const rows=await env.DB.prepare('SELECT * FROM projects ORDER BY name').all<any>();return json(rows.results.map(p=>{const item={...p,topics:JSON.parse(p.topics)};if(url.searchParams.get('metadata')==='true')delete item.instructions;return item}))}
   if(path==='/v1/tasks'){
-   const repository=url.searchParams.get('repository'),rows=await env.DB.prepare(`SELECT t.id,t.repository,t.kind,t.title,t.source,t.scope,t.status,CASE WHEN json_extract(d.preferences,'$.public')=1 THEN d.login ELSE NULL END AS donor,t.expires,t.attempts,p.commit_sha,p.instructions,p.instructions_path FROM tasks t JOIN projects p ON p.repository=t.repository LEFT JOIN donors d ON d.id=t.donor WHERE p.enabled=1 ${repository?'AND t.repository=?':''} ORDER BY t.attempts,t.created`).bind(...(repository?[repository]:[])).all();return json(rows.results);
+   const repository=url.searchParams.get('repository'),rows=await env.DB.prepare(`SELECT t.id,t.repository,t.kind,t.title,t.source,t.scope,t.status,t.phase,t.proposal,t.prepared_at,t.proposal_commit,CASE WHEN json_extract(d.preferences,'$.public')=1 THEN d.login ELSE NULL END AS donor,t.expires,t.attempts,COALESCE(t.proposal_commit,p.commit_sha) AS commit_sha,CASE WHEN t.phase='preparation' THEN p.instructions ELSE NULL END AS instructions,p.instructions_path FROM tasks t JOIN projects p ON p.repository=t.repository LEFT JOIN donors d ON d.id=t.donor WHERE p.enabled=1 ${repository?'AND t.repository=?':''} ORDER BY t.attempts,t.created`).bind(...(repository?[repository]:[])).all<any>();return json(rows.results.map(t=>({...t,proposal:t.proposal?JSON.parse(t.proposal):null})));
   }
   if(path==='/v1/reports'){const rows=await env.DB.prepare(`SELECT r.id,r.task,r.outcome,r.report,r.result_url,r.created,t.repository,CASE WHEN json_extract(d.preferences,'$.public')=1 THEN d.login ELSE 'Anonymous donor' END AS donor FROM reports r JOIN donors d ON d.id=r.donor JOIN tasks t ON t.id=r.task ORDER BY r.created DESC LIMIT 100`).all();return json(rows.results)}
   if(path==='/v1/me'){const user=await donor(request,env);return json({id:user.id,login:user.login,preferences:JSON.parse(user.preferences)})}
@@ -124,23 +146,34 @@ async function route(request:Request,env:Env):Promise<Response>{
   if(!source.startsWith(repository+'/')&&source!==repository)throw new APIError(400,'Source must belong to the enrolled repository');
   const id='github:'+repositoryName(repository)+':'+scope;
   await env.DB.prepare('INSERT OR IGNORE INTO tasks(id,repository,kind,title,source,scope,created) VALUES(?,?,?,?,?,?,?)').bind(id,repository,kind,title,source,scope,now()).run();
-  const task=await env.DB.prepare('SELECT id,repository,kind,title,source,scope,status FROM tasks WHERE id=?').bind(id).first<any>();
+  const task=await env.DB.prepare('SELECT id,repository,kind,title,source,scope,status,phase FROM tasks WHERE id=?').bind(id).first<any>();
   if(task.kind!==kind||task.source!==source)throw new APIError(409,'Scope is already registered with a different source or activity');return json(task);
  }
- if(['/v1/claim','/v1/heartbeat','/v1/release','/v1/complete','/v1/pause'].includes(path)){
+ if(['/v1/claim','/v1/heartbeat','/v1/release','/v1/complete','/v1/pause','/v1/prepare'].includes(path)){
   const taskId=str(body,'task'),task=await env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(taskId).first<any>();if(!task)throw new APIError(404,'Unknown task');
   if(path==='/v1/claim'){
+   const phase=body.phase||'execution';if(phase!==task.phase)throw new APIError(409,'Task requires '+task.phase+' before it can be executed');
    const project=await projectReady(env,task.repository),requestId=str(body,'request_id',100);
    const token=random(),expires=now()+600;
-   const claimed=await env.DB.prepare(`UPDATE tasks SET token=?,donor=?,expires=?,request_id=?,instructions_snapshot=?,commit_snapshot=?,attempts=attempts+1 WHERE id=? AND status='available' AND (expires IS NULL OR expires<=?) AND (SELECT COUNT(*) FROM tasks WHERE donor=? AND expires>?)<3 RETURNING id`).bind(token,user.id,expires,requestId,project.instructions,project.commit_sha,taskId,now(),user.id,now()).first();
-   if(!claimed){const current=await env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(taskId).first<any>();if(current.request_id===requestId&&current.donor===user.id&&current.expires>now())return json({task:taskId,token:current.token,expires:current.expires,instructions:current.instructions_snapshot,commit_sha:current.commit_snapshot});throw new APIError(409,'Task is already claimed or paused')}
-   return json({task:taskId,token,expires,instructions:project.instructions,commit_sha:project.commit_sha});
+   const claimed=await env.DB.prepare(`UPDATE tasks SET token=?,donor=?,expires=?,request_id=?,claim_phase=?,instructions_snapshot=?,commit_snapshot=?,attempts=attempts+1 WHERE id=? AND status='available' AND phase=? AND (expires IS NULL OR expires<=?) AND (SELECT COUNT(*) FROM tasks WHERE donor=? AND expires>?)<3 RETURNING id`).bind(token,user.id,expires,requestId,phase,project.instructions,phase==='execution'?task.proposal_commit:project.commit_sha,taskId,phase,now(),user.id,now()).first();
+   if(!claimed){const current=await env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(taskId).first<any>();if(current.request_id===requestId&&current.donor===user.id&&current.expires>now())return json(claimResult(current));throw new APIError(409,'Task is already claimed or paused')}
+   return json(claimResult({...task,token,expires,instructions_snapshot:project.instructions,commit_snapshot:phase==='execution'?task.proposal_commit:project.commit_sha}));
   }
   const token=str(body,'token',200);
   if(path==='/v1/heartbeat'){
    const p=await env.DB.prepare('SELECT enabled FROM projects WHERE repository=?').bind(task.repository).first<any>();if(!p?.enabled)throw new APIError(409,'Project paused; stop this session');
    const expires=now()+600,renewed=await env.DB.prepare('UPDATE tasks SET expires=? WHERE id=? AND token=? AND donor=? AND expires>? RETURNING id').bind(expires,taskId,token,user.id,now()).first();if(!renewed)throw new APIError(409,'Claim expired or invalid');return json({task:taskId,expires});
   }
+  if(path==='/v1/prepare'){
+   const prepared=proposal(body,task.repository),encoded=JSON.stringify(prepared);
+   const proofHash=await hash(token),prior=await env.DB.prepare('SELECT report FROM reports WHERE claim_hash=? AND donor=? AND task=? AND outcome=?').bind(proofHash,user.id,taskId,'prepare').first<any>();
+   if(prior){if(prior.report!==encoded)throw new APIError(409,'Preparation already submitted with different contents');return json({task:taskId,phase:'execution',proposal:prepared})}
+   const id=crypto.randomUUID();const results=await env.DB.batch([
+    env.DB.prepare(`INSERT INTO reports(id,task,donor,outcome,report,created,claim_hash) SELECT ?,id,?,'prepare',?,?,? FROM tasks WHERE id=? AND phase='preparation' AND token=? AND donor=? AND expires>?`).bind(id,user.id,encoded,now(),proofHash,taskId,token,user.id,now()),
+    env.DB.prepare(`UPDATE tasks SET phase='execution',proposal_commit=commit_snapshot,proposal=?,prepared_by=?,prepared_at=?,token=NULL,donor=NULL,expires=NULL,request_id=NULL WHERE id=? AND token=? AND donor=? AND EXISTS(SELECT 1 FROM reports WHERE id=?)`).bind(encoded,user.id,now(),taskId,token,user.id,id)
+   ]);if(!results[0].meta.changes)throw new APIError(409,'Preparation claim expired or invalid');return json({task:taskId,phase:'execution',proposal:prepared});
+  }
+  if(path==='/v1/complete'&&task.phase==='preparation')throw new APIError(409,'Submit a proposal with prepare; preparation cannot be completed as execution');
   const outcome=path.slice(4),report=str(body,'report',30000),claimHash=await hash(token);
   const prior=await env.DB.prepare('SELECT * FROM reports WHERE claim_hash=? AND donor=? AND task=?').bind(claimHash,user.id,taskId).first<any>();
   if(prior){if(prior.outcome!==outcome||prior.report!==report||(prior.result_url||null)!==(body.result_url||null))throw new APIError(409,'Claim already submitted with different contents');return json({task:taskId,outcome,id:prior.id})}
